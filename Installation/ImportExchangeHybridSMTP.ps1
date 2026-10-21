@@ -93,12 +93,57 @@ Write-Host "ReceiveConnectorName: $ReceiveConnectorName"
 Write-Host "SendConnectorName: $SendConnectorName"
 Write-Host "LeaveOldExchangeCerts: $LeaveOldExchangeCerts"
 
-# Load Exchange Management shell
-# https://github.com/simple-acme/simple-acme/issues/1372
+# Get Server FQDN for the current server. This is used to connect to the Exchange server.
 $ServerFQDN = ([System.Net.Dns]::GetHostByName(($env:computerName))).Hostname
-$ConnectionUri = "http://$ServerFQDN/PowerShell/"
-$Session = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri $ConnectionUri
-Import-PSSession $Session
+
+# Connect to Exchange Server
+# This code checks if a connection to an Exchange server exists. If no connection exists, it loads the Exchange Management Shell (EMS) and tries to connect to the local Exchange Server.
+# Check if a connection to an exchange server exists. If no connection exists, load EMS and connect
+if (-NOT (Get-PSSession | Where-Object ConfigurationName -EQ "Microsoft.Exchange"))
+{
+	# Define EMS script path
+	$EMSModuleFile = (Get-ItemProperty HKLM:\SOFTWARE\Microsoft\ExchangeServer\v15\Setup -ErrorAction SilentlyContinue).MsiInstallPath + "bin\RemoteExchange.ps1"
+
+	# If the EMS Module wasn't found
+	if ([System.String]::IsNullOrEmpty($EMSModuleFile) -or -Not (Test-Path $EMSModuleFile))
+	{
+		# Write Error and exit the script
+		Write-Error -Message "Exchange Management Shell script not found. Please make sure Exchange Management Tools are installed on this server. Exiting script."
+		Throw
+	}
+
+	else
+	{
+		# Load Exchange Management Shell
+		try
+		{
+			# Dot source the EMS Script
+			. $($EMSModuleFile) -ErrorAction Stop
+			Write-Host -Object "Successfully loaded Exchange Management Shell script." -ForegroundColor Green
+		}
+
+		catch
+		{
+			Write-Error -Message "Unable to load Exchange Management Shell script. $_"
+			Write-Error -Message "Exiting script."
+			Throw
+		}
+
+		# Connect to Exchange Server
+		try
+		{
+			Connect-ExchangeServer -ServerFqdn $ServerFQDN -ClientApplication:ManagementShell -ErrorAction Stop
+			Write-Host -Object "Successfully connected to Exchange Server." -ForegroundColor Green
+		}
+
+		catch
+		{
+			Write-Error -Message "Unable to connect to Exchange Server. $_"
+			Write-Error -Message "Exiting script."
+			Throw
+		}
+	}
+}
 
 # Test if all Cmdlets are there now
 $RequiredCmdlets = @("Enable-ExchangeCertificate", "Get-ExchangeCertificate", "Get-SendConnector", "Set-SendConnector", "Get-ReceiveConnector", "Set-ReceiveConnector", "Set-HybridConfiguration")
